@@ -56,7 +56,7 @@ app.post("/slack/commands", async (req, res) => {
 
 // Combined Interactivity Endpoint for Modal Submissions and Button Actions
 app.post("/slack/interactions", async (req, res) => {
-  console.log("📬 /slack/interactions hit");
+  console.log(" /slack/interactions hit");
 
   let payload;
   try {
@@ -144,9 +144,9 @@ app.post("/slack/interactions", async (req, res) => {
 
     // Log the status to the terminal
     console.log("------ Approval Action ------");
-    console.log(`🧑‍💼 Requester: ${requester}`);
-    console.log(`📝 Request: ${requestText}`);
-    console.log(`🚦 Decision: ${status.toUpperCase()}`);
+    console.log(` Requester: ${requester}`);
+    console.log(` Request: ${requestText}`);
+    console.log(` Decision: ${status.toUpperCase()}`);
     console.log("-----------------------------");
 
     const responseText =
@@ -173,4 +173,4 @@ app.post("/slack/interactions", async (req, res) => {
 
 // Start the server
 const PORT = process.env.APP_PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(` Server running on port ${PORT}`));
