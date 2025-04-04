@@ -4,26 +4,16 @@ const { App } = require("@slack/bolt");
 
 const app = express();
 
-// Fix: Add URL-encoded middleware (Slack sends form-data, not JSON)
-app.use(express.json());
+// Slack sends x-www-form-urlencoded data
 app.use(express.urlencoded({ extended: true }));
 
-//  Initialize Slack App
 const slackApp = new App({
   token: process.env.SLACK_BOT_TOKEN,
   signingSecret: process.env.SLACK_SIGNING_SECRET,
 });
 
-//  Slash Command Endpoint
+// Slash Command Handler
 app.post("/slack/commands", async (req, res) => {
-  console.log("Received Slash Command:", req.body); // Debugging
-
-  // Fix: Handle missing req.body
-  if (!req.body || !req.body.command) {
-    console.error("Invalid request:", req.body);
-    return res.status(400).send("Invalid request");
-  }
-
   const { command, trigger_id } = req.body;
 
   if (command === "/approval-test") {
@@ -58,97 +48,129 @@ app.post("/slack/commands", async (req, res) => {
         submit: { type: "plain_text", text: "Submit" },
       },
     });
-
-    res.send(""); // Acknowledge request
+    res.send("");
   } else {
     res.status(400).send("Unknown command");
   }
 });
 
-//  Handle Modal Submission
+// Combined Interactivity Endpoint for Modal Submissions and Button Actions
 app.post("/slack/interactions", async (req, res) => {
-  const payload = JSON.parse(req.body.payload);
-  console.log("Received Interaction:", JSON.stringify(payload, null, 2)); // Debugging
+  console.log("📬 /slack/interactions hit");
 
+  let payload;
+  try {
+    payload = JSON.parse(req.body.payload);
+  } catch (err) {
+    console.error("❌ Error parsing payload:", err);
+    return res.status(400).send("Invalid payload");
+  }
+
+  // Handle Modal Submission
   if (payload.type === "view_submission") {
-    try {
-      const approver =
-        payload.view.state.values.approver_block.approver.selected_user;
-      const requestText =
-        payload.view.state.values.request_block.request_text.value;
-      const requester = payload.user.id;
+    const approver =
+      payload.view.state.values.approver_block.approver.selected_user;
+    const requestText =
+      payload.view.state.values.request_block.request_text.value;
+    const requester = payload.user.id;
 
-      console.log("Approver:", approver);
-      console.log("Request Text:", requestText);
-      console.log("Requester:", requester);
-
-      await slackApp.client.chat.postMessage({
-        channel: approver,
-        text: `Approval request from <@${requester}>: "${requestText}"`,
-        blocks: [
-          {
-            type: "section",
-            text: {
-              type: "mrkdwn",
-              text: `Approval request from <@${requester}>:\n\n *"${requestText}"*`,
-            },
-          },
-          {
-            type: "actions",
-            block_id: "approval_action",
-            elements: [
-              {
-                type: "button",
-                text: { type: "plain_text", text: "Approve ✅" },
-                value: `${requester}_approved`,
-                action_id: "approve",
-              },
-              {
-                type: "button",
-                text: { type: "plain_text", text: "Reject ❌" },
-                value: `${requester}_rejected`,
-                action_id: "reject",
-              },
-            ],
-          },
-        ],
+    // Prevent self-approval
+    if (approver === requester) {
+      return res.send({
+        response_action: "errors",
+        errors: {
+          approver_block: "You cannot select yourself as the approver.",
+        },
       });
-
-      //  Fix: Acknowledge request with a proper response
-      res.send({ response_action: "clear" });
-    } catch (error) {
-      console.error("Error handling view_submission:", error);
-      res.status(500).send("Internal Server Error");
     }
+
+    await slackApp.client.chat.postMessage({
+      channel: approver,
+      text: `Approval request from <@${requester}>: "${requestText}"`,
+      blocks: [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `Approval request from <@${requester}>:\n\n *"${requestText}"*`,
+          },
+        },
+        {
+          type: "actions",
+          block_id: "approval_action",
+          elements: [
+            {
+              type: "button",
+              text: { type: "plain_text", text: "Approve ✅" },
+              value: JSON.stringify({
+                requester,
+                status: "approved",
+                requestText,
+              }),
+              action_id: "approve",
+            },
+            {
+              type: "button",
+              text: { type: "plain_text", text: "Reject ❌" },
+              value: JSON.stringify({
+                requester,
+                status: "rejected",
+                requestText,
+              }),
+              action_id: "reject",
+            },
+          ],
+        },
+      ],
+    });
+
+    // Log the received message from modal submission
+    console.log("Modal submitted with message:", requestText);
+    res.send({ response_action: "clear" });
+  }
+  // Handle Button Actions
+  else if (payload.type === "block_actions") {
+    const action = payload.actions[0];
+
+    let valueData;
+    try {
+      valueData = JSON.parse(action.value);
+    } catch (err) {
+      console.error("❌ Error parsing button value:", err);
+      return res.status(400).send("Invalid button data");
+    }
+
+    const { requester, status, requestText } = valueData;
+
+    // Log the status to the terminal
+    console.log("------ Approval Action ------");
+    console.log(`🧑‍💼 Requester: ${requester}`);
+    console.log(`📝 Request: ${requestText}`);
+    console.log(`🚦 Decision: ${status.toUpperCase()}`);
+    console.log("-----------------------------");
+
+    const responseText =
+      status === "approved"
+        ? `✅ Your request has been *approved*.\n\n> ${requestText}`
+        : `❌ Your request has been *rejected*.\n\n> ${requestText}`;
+
+    try {
+      const im = await slackApp.client.conversations.open({ users: requester });
+      await slackApp.client.chat.postMessage({
+        channel: im.channel.id,
+        text: responseText,
+      });
+      console.log("✅ Notified requester successfully");
+    } catch (error) {
+      console.error("❌ Error notifying requester:", error);
+    }
+
+    res.send(""); // Acknowledge the action
   } else {
-    res.status(400).send("Invalid payload type");
+    res.status(400).send("Unhandled payload type");
   }
 });
 
-// Handle Approval/Rejection Actions
-app.post("/slack/actions", async (req, res) => {
-  const payload = JSON.parse(req.body.payload);
-  console.log("Received Action:", JSON.stringify(payload, null, 2)); // Debugging
-
-  const action = payload.actions[0];
-  const [requester, status] = action.value.split("_");
-
-  console.log("Requester:", requester);
-  console.log("Status:", status);
-
-  const responseText =
-    status === "approved"
-      ? "✅ Your request has been approved!"
-      : "❌ Your request has been rejected.";
-
-  await slackApp.client.chat.postMessage({
-    channel: requester,
-    text: responseText,
-  });
-
-  res.send(""); // Acknowledge request
-});
-
-//  Start the server
+// Start the server
 const PORT = process.env.APP_PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
