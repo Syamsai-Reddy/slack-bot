@@ -4,7 +4,6 @@ const { App } = require("@slack/bolt");
 
 const app = express();
 
-// Slack sends x-www-form-urlencoded data
 app.use(express.urlencoded({ extended: true }));
 
 const slackApp = new App({
@@ -12,7 +11,6 @@ const slackApp = new App({
   signingSecret: process.env.SLACK_SIGNING_SECRET,
 });
 
-// Slash Command Handler
 app.post("/slack/commands", async (req, res) => {
   const { command, trigger_id } = req.body;
 
@@ -54,7 +52,6 @@ app.post("/slack/commands", async (req, res) => {
   }
 });
 
-// Combined Interactivity Endpoint for Modal Submissions and Button Actions
 app.post("/slack/interactions", async (req, res) => {
   console.log(" /slack/interactions hit");
 
@@ -62,11 +59,10 @@ app.post("/slack/interactions", async (req, res) => {
   try {
     payload = JSON.parse(req.body.payload);
   } catch (err) {
-    console.error("❌ Error parsing payload:", err);
+    console.error(" Error parsing payload:", err);
     return res.status(400).send("Invalid payload");
   }
 
-  // Handle Modal Submission
   if (payload.type === "view_submission") {
     const approver =
       payload.view.state.values.approver_block.approver.selected_user;
@@ -74,7 +70,6 @@ app.post("/slack/interactions", async (req, res) => {
       payload.view.state.values.request_block.request_text.value;
     const requester = payload.user.id;
 
-    // Prevent self-approval
     if (approver === requester) {
       return res.send({
         response_action: "errors",
@@ -101,7 +96,7 @@ app.post("/slack/interactions", async (req, res) => {
           elements: [
             {
               type: "button",
-              text: { type: "plain_text", text: "Approve ✅" },
+              text: { type: "plain_text", text: "Approve " },
               value: JSON.stringify({
                 requester,
                 status: "approved",
@@ -111,7 +106,7 @@ app.post("/slack/interactions", async (req, res) => {
             },
             {
               type: "button",
-              text: { type: "plain_text", text: "Reject ❌" },
+              text: { type: "plain_text", text: "Reject " },
               value: JSON.stringify({
                 requester,
                 status: "rejected",
@@ -124,25 +119,21 @@ app.post("/slack/interactions", async (req, res) => {
       ],
     });
 
-    // Log the received message from modal submission
     console.log("Modal submitted with message:", requestText);
     res.send({ response_action: "clear" });
-  }
-  // Handle Button Actions
-  else if (payload.type === "block_actions") {
+  } else if (payload.type === "block_actions") {
     const action = payload.actions[0];
 
     let valueData;
     try {
       valueData = JSON.parse(action.value);
     } catch (err) {
-      console.error("❌ Error parsing button value:", err);
+      console.error(" Error parsing button value:", err);
       return res.status(400).send("Invalid button data");
     }
 
     const { requester, status, requestText } = valueData;
 
-    // Log the status to the terminal
     console.log("------ Approval Action ------");
     console.log(` Requester: ${requester}`);
     console.log(` Request: ${requestText}`);
@@ -151,8 +142,8 @@ app.post("/slack/interactions", async (req, res) => {
 
     const responseText =
       status === "approved"
-        ? `✅ Your request has been *approved*.\n\n> ${requestText}`
-        : `❌ Your request has been *rejected*.\n\n> ${requestText}`;
+        ? ` Your request has been *approved*.\n\n> ${requestText}`
+        : ` Your request has been *rejected*.\n\n> ${requestText}`;
 
     try {
       const im = await slackApp.client.conversations.open({ users: requester });
@@ -160,17 +151,16 @@ app.post("/slack/interactions", async (req, res) => {
         channel: im.channel.id,
         text: responseText,
       });
-      console.log("✅ Notified requester successfully");
+      console.log(" Notified requester successfully");
     } catch (error) {
-      console.error("❌ Error notifying requester:", error);
+      console.error(" Error notifying requester:", error);
     }
 
-    res.send(""); // Acknowledge the action
+    res.send("");
   } else {
     res.status(400).send("Unhandled payload type");
   }
 });
 
-// Start the server
 const PORT = process.env.APP_PORT || 3000;
 app.listen(PORT, () => console.log(` Server running on port ${PORT}`));
